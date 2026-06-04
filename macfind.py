@@ -26,10 +26,8 @@ def parse_agents():
 
 
 def classify_port(interface_name, mac_count):
-
     name = interface_name.lower()
-
-    # Name-based heuristic
+     
     if (
         "tengig" in name or
         "port-channel" in name or
@@ -50,6 +48,40 @@ def classify_port(interface_name, mac_count):
         return "UPLINK"
 
     return "EDGE"
+
+
+def retrieve_ifindex_mapping(agent):
+    
+
+    bridge_to_ifindex = {}
+    session = Session(
+        hostname=agent['ip'],
+        community=agent['community'],
+        version=2,
+        remote_port=agent['port']
+    )
+
+    try:
+        entries = session.bulkwalk(BASE_PORT_IFINDEX_OID)
+        for entry in entries:
+            try:
+                if entry.oid_index == '':
+                    bridge_port_str = entry.oid.split('.')[-1]
+                else:
+                    bridge_port_str = entry.oid_index.replace('.', '')
+                
+                bridge_port = int(bridge_port_str)
+                ifindex = int(entry.value)
+                bridge_to_ifindex[bridge_port] = ifindex
+                
+            except ValueError as ve:
+                print(f"  -> Skipping due to conversion error: {ve}")
+
+        return bridge_to_ifindex
+    except Exception as e:
+        print(f"{agent['ip']} | IFINDEX ERROR | {e}")
+        return {}
+
 
 def retrieve_ifdescr_mapping(agent):
     ifindex_to_name = {}
@@ -73,8 +105,6 @@ def retrieve_ifdescr_mapping(agent):
                     ifindex_str = entry.oid_index.replace('.', '')
 
                 ifindex = int(ifindex_str)
-
-                
                 interface_name = entry.value
                 ifindex_to_name[ifindex] = interface_name
 
@@ -104,11 +134,8 @@ def retrieve_mac_addresses(agent):
     try:
         entries = session.bulkwalk(FDB_PORT_OID)
         for entry in entries:
-            # --- DEBUG PRINT ---
-            print(f"RAW MAC DATA -> OID: {entry.oid} | INDEX: '{entry.oid_index}' | VALUE: '{entry.value}'")
-            
             try:
-                # If oid_index is missing, extract MAC from the end of the full OID
+                
                 if entry.oid_index == '':
                     mac_parts = entry.oid.split('.')[-6:]
                 else:
@@ -141,6 +168,13 @@ def main():
     for agent in agents:
         print(f"\n--- Fetching MAC table for {agent['ip']} ---")
         mac_table = retrieve_mac_addresses(agent)
+        
+       
+        port_mac_count = {}
+        for mac, bridge_port in mac_table.items():
+            if bridge_port not in port_mac_count:
+                port_mac_count[bridge_port] = 0
+            port_mac_count[bridge_port] += 1
 
         print(f"\n--- Fetching ifIndex mapping for {agent['ip']} ---")
         bridge_mapping = retrieve_ifindex_mapping(agent)
@@ -151,7 +185,6 @@ def main():
         print(f"\n--- Combined Results for {agent['ip']} ---")
         for mac, bridge_port in mac_table.items():
             
-            # Properly indented inside the loop
             if bridge_port not in bridge_mapping:
                 continue
 
@@ -162,13 +195,24 @@ def main():
                 "UNKNOWN"
             )
 
-            # Print statement is now properly inside the loop
+            mac_count = port_mac_count.get(
+                bridge_port,
+                0
+            )
+
+            port_type = classify_port(
+                interface_name,
+                mac_count
+            )
+
+            # Properly indented inside the combination loop
             print(
                 f"{agent['ip']} | "
                 f"{mac} | "
                 f"bridge port {bridge_port} | "
                 f"ifIndex {ifindex} | "
-                f"{interface_name}"
+                f"{interface_name} | "
+                f"{port_type}"
             )
 
 
