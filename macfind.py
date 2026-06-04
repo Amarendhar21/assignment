@@ -1,53 +1,71 @@
 import sys
 from easysnmp import Session
+import argparse
+import re
 
 FDB_PORT_OID = '1.3.6.1.2.1.17.4.3.1.2'
 BASE_PORT_IFINDEX_OID = '1.3.6.1.2.1.17.1.4.1.2'
 IFDESCR_OID = '1.3.6.1.2.1.2.2.1.2'
+SYSUPTIME_OID = '1.3.6.1.2.1.1.3.0'
 
 
-def parse_agents():
-    agents = []
+def parse_arguments():
 
-    for arg in sys.argv[1:]:
-        try:
-            ip, port, community = arg.split(':')
-            agents.append({
-                'ip': ip,
-                'port': int(port),
-                'community': community
-            })
-        except ValueError:
-            print(f"Invalid format: {arg}")
-            print("Expected: ip:port:community")
-            sys.exit(1)
+    parser = argparse.ArgumentParser()
 
-    return agents
+    parser.add_argument(
+        '--host',
+        required=True
+    )
+
+    parser.add_argument(
+        '--community',
+        required=True
+    )
+
+    parser.add_argument(
+        '--version',
+        default='2c'
+    )
+
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=161
+    )
+
+    parser.add_argument(
+        '--timeout',
+        type=int,
+        default=5
+    )
+
+    parser.add_argument(
+        '--retries',
+        type=int,
+        default=2
+    )
+
+    parser.add_argument(
+        '--uplink-pattern',
+        default='TenGig|Port-channel|Uplink'
+    )
+
+    return parser.parse_args()
 
 
-def classify_port(interface_name, mac_count):
-    name = interface_name.lower()
-     
-    if (
-        "tengig" in name or
-        "port-channel" in name or
-        "uplink" in name or
-        "trunk" in name
-    ):
-        return "UPLINK"
+def get_sysuptime(agent):
 
-    if (
-        "gigabitethernet" in name or
-        "fastethernet" in name or
-        "access" in name
-    ):
-        return "EDGE"
+    session = Session(
+        hostname=agent['ip'],
+        community=agent['community'],
+        version=2,
+        remote_port=agent['port']
+    )
 
-    # Fallback: MAC count heuristic
-    if mac_count > 1:
-        return "UPLINK"
+    result = session.get(SYSUPTIME_OID)
 
-    return "EDGE"
+    return int(result.value)
 
 
 def retrieve_ifindex_mapping(agent):
