@@ -25,40 +25,31 @@ def parse_agents():
     return agents
 
 
-def retrieve_ifindex_mapping(agent):
-    """
-    Retrieves the mapping between bridge ports and ifIndex.
-    Re-added from previous script versions so main() doesn't fail.
-    """
-    bridge_to_ifindex = {}
-    session = Session(
-        hostname=agent['ip'],
-        community=agent['community'],
-        version=2,
-        remote_port=agent['port']
-    )
+def classify_port(interface_name, mac_count):
 
-    try:
-        entries = session.bulkwalk(BASE_PORT_IFINDEX_OID)
-        for entry in entries:
-            try:
-                if entry.oid_index == '':
-                    bridge_port_str = entry.oid.split('.')[-1]
-                else:
-                    bridge_port_str = entry.oid_index.replace('.', '')
-                
-                bridge_port = int(bridge_port_str)
-                ifindex = int(entry.value)
-                bridge_to_ifindex[bridge_port] = ifindex
-                
-            except ValueError as ve:
-                print(f"  -> Skipping due to conversion error: {ve}")
+    name = interface_name.lower()
 
-        return bridge_to_ifindex
-    except Exception as e:
-        print(f"{agent['ip']} | IFINDEX ERROR | {e}")
-        return {}
+    # Name-based heuristic
+    if (
+        "tengig" in name or
+        "port-channel" in name or
+        "uplink" in name or
+        "trunk" in name
+    ):
+        return "UPLINK"
 
+    if (
+        "gigabitethernet" in name or
+        "fastethernet" in name or
+        "access" in name
+    ):
+        return "EDGE"
+
+    # Fallback: MAC count heuristic
+    if mac_count > 1:
+        return "UPLINK"
+
+    return "EDGE"
 
 def retrieve_ifdescr_mapping(agent):
     ifindex_to_name = {}
