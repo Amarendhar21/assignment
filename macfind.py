@@ -138,7 +138,33 @@ def retrieve_mac_addresses(agent):
     except Exception:
         return {}
 
+def main():
+    args = parse_arguments()
+    agents = [parse_agent(agent) for agent in args.agents]
+    requested_macs = set()
+    for mac in args.macs:
+        try:
+            requested_macs.add(normalize_mac(mac))
+        except ValueError as e:
+            print(f"Warning: {e}")
 
+    results = {mac: [] for mac in requested_macs}
+
+    # Gather all switch interface MACs upfront for cross-referencing uplinks
+    all_switch_macs = {}
+    global_switch_macs = set()
+    for agent in agents:
+        all_switch_macs[agent['ip']] = retrieve_switch_macs(agent)
+        global_switch_macs.update(all_switch_macs[agent['ip']])
+
+    for agent in agents:
+        start_uptime = get_sysuptime(agent)
+        if start_uptime is None:
+            continue # Timeout message already printed by get_sysuptime
+
+        mac_table = retrieve_mac_addresses(agent)
+        if not mac_table:
+            continue
 
 
 
