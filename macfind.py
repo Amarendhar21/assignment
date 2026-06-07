@@ -149,8 +149,6 @@ def main():
             print(f"Warning: {e}")
 
     results = {mac: [] for mac in requested_macs}
-
-    # Gather all switch interface MACs upfront for cross-referencing uplinks
     all_switch_macs = {}
     global_switch_macs = set()
     for agent in agents:
@@ -160,14 +158,42 @@ def main():
     for agent in agents:
         start_uptime = get_sysuptime(agent)
         if start_uptime is None:
-            continue # Timeout message already printed by get_sysuptime
+            continue
 
         mac_table = retrieve_mac_addresses(agent)
         if not mac_table:
             continue
 
+ # Build reverse mapping: bridge_port -> list of MACs
+        port_macs = {}
+        for mac, bp in mac_table.items():
+            port_macs.setdefault(bp, []).append(mac)
+        port_mac_count = {bp: len(macs) for bp, macs in port_macs.items()}
 
+        bridge_mapping = retrieve_ifindex_mapping(agent)
+        ifdescr_mapping = retrieve_ifdescr_mapping(agent)
 
+        end_uptime = get_sysuptime(agent)
+        if end_uptime is None:
+            continue
 
+        if end_uptime < start_uptime:
+            print(f"Agent {agent['ip']} has RESET — results from this agent may be stale")
+            continue
+
+        # MATCHING LOGIC: Iterate ONLY over requested MACs to prevent console spam
+        for req_mac in requested_macs:
+            if req_mac not in mac_table:
+                continue # Will be reported as NOT FOUND at the end
+
+            bridge_port = mac_table[req_mac]
+            if bridge_port not in bridge_mapping:
+                continue
+
+            ifindex = bridge_mapping[bridge_port]
+            interface_name = ifdescr_mapping.get(ifindex, "UNKNOWN")
+            mac_count = port_mac_count.get(bridge_port, 0)
+
+ 
 if __name__ == "__main__":
     main()
