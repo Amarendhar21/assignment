@@ -43,7 +43,6 @@ def get_sysuptime(agent):
 
 
 def retrieve_switch_macs(agent):
-    """Walks ifPhysAddress to get all interface MACs of this specific switch for uplink detection."""
     switch_macs = set()
     session = Session(hostname=agent['ip'], community=agent['community'], version=2, remote_port=agent['port'])
     try:
