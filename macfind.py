@@ -89,11 +89,59 @@ def retrieve_ifindex_mapping(agent):
     except Exception:
         return {}
 
+def retrieve_ifdescr_mapping(agent):
+    ifindex_to_name = {}
+    session = Session(hostname=agent['ip'], community=agent['community'], version=2, remote_port=agent['port'])
+    try:
+        entries = session.bulkwalk(IFDESCR_OID)
+        for entry in entries:
+            try:
+                if entry.oid_index == '':
+                    ifindex_str = entry.oid.split('.')[-1]
+                else:
+                    ifindex_str = entry.oid_index.replace('.', '')
+
+                ifindex = int(ifindex_str)
+                ifindex_to_name[ifindex] = entry.value
+            except (ValueError, AttributeError):
+                continue
+        return ifindex_to_name
+    except Exception:
+        return {}
+
+
+def retrieve_mac_addresses(agent):
+    mac_table = {}
+    session = Session(hostname=agent['ip'], community=agent['community'], version=2, remote_port=agent['port'])
+    try:
+        entries = session.bulkwalk(FDB_PORT_OID)
+        for entry in entries:
+            try:
+                if entry.oid_index == '':
+                    mac_parts = entry.oid.split('.')[-6:]
+                else:
+                    mac_parts = [p for p in entry.oid_index.split('.') if p != '']
+
+                if len(mac_parts) != 6:
+                    continue
+
+                mac_address = ':'.join(f"{int(part):02x}" for part in mac_parts)
+
+                if not entry.value or entry.value == '0':
+                    continue
+
+                bridge_port = int(entry.value)
+                mac_table[mac_address] = bridge_port
+            except (ValueError, AttributeError):
+                continue
+        return mac_table
+    except Exception:
+        return {}
 
 
 
 
 
-        
+
 if __name__ == "__main__":
     main()
