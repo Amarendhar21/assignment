@@ -194,6 +194,34 @@ def main():
             interface_name = ifdescr_mapping.get(ifindex, "UNKNOWN")
             mac_count = port_mac_count.get(bridge_port, 0)
 
- 
+   # Cross-reference to detect uplinks
+            is_uplink = False
+            for mac_on_port in port_macs.get(bridge_port, []):
+                if mac_on_port in global_switch_macs and mac_on_port not in all_switch_macs[agent['ip']]:
+                    is_uplink = True
+                    break
+
+            port_type = "uplink" if is_uplink else classify_port(interface_name, mac_count, args.uplink_pattern)
+
+            results[req_mac].append({
+                "agent": agent["ip"],
+                "port": interface_name,
+                "type": port_type
+            })
+
+    # Final Reporting (Exact spacing per assignment spec: two spaces around pipes)
+    print("\n==============================")
+    print("FINAL REPORT")
+    print("==============================")
+
+    for mac in requested_macs:
+        if len(results[mac]) == 0:
+            print(f"{mac}  |  NOT FOUND")
+        else:
+            for entry in results[mac]:
+                print(f"{mac}  |  {entry['agent']}  |  {entry['port']}  |  {entry['type']}")
+
+
+                
 if __name__ == "__main__":
     main()
