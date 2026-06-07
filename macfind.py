@@ -164,7 +164,7 @@ def main():
         if not mac_table:
             continue
 
- # Build reverse mapping: bridge_port -> list of MACs
+ 
         port_macs = {}
         for mac, bp in mac_table.items():
             port_macs.setdefault(bp, []).append(mac)
@@ -181,7 +181,6 @@ def main():
             print(f"Agent {agent['ip']} has RESET — results from this agent may be stale")
             continue
 
-        # MATCHING LOGIC: Iterate ONLY over requested MACs to prevent console spam
         for req_mac in requested_macs:
             if req_mac not in mac_table:
                 continue # Will be reported as NOT FOUND at the end
@@ -193,8 +192,6 @@ def main():
             ifindex = bridge_mapping[bridge_port]
             interface_name = ifdescr_mapping.get(ifindex, "UNKNOWN")
             mac_count = port_mac_count.get(bridge_port, 0)
-
-   # Cross-reference to detect uplinks
             is_uplink = False
             for mac_on_port in port_macs.get(bridge_port, []):
                 if mac_on_port in global_switch_macs and mac_on_port not in all_switch_macs[agent['ip']]:
@@ -209,7 +206,6 @@ def main():
                 "type": port_type
             })
 
-    # Final Reporting (Exact spacing per assignment spec: two spaces around pipes)
     print("\n==============================")
     print("FINAL REPORT")
     print("==============================")
@@ -222,6 +218,6 @@ def main():
                 print(f"{mac}  |  {entry['agent']}  |  {entry['port']}  |  {entry['type']}")
 
 
-                
+
 if __name__ == "__main__":
     main()
