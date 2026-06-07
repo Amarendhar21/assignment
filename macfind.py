@@ -1,61 +1,44 @@
-import sys
-from easysnmp import Session
 import argparse
 import re
+from easysnmp import Session
 
 FDB_PORT_OID = '1.3.6.1.2.1.17.4.3.1.2'
 BASE_PORT_IFINDEX_OID = '1.3.6.1.2.1.17.1.4.1.2'
 IFDESCR_OID = '1.3.6.1.2.1.2.2.1.2'
 SYSUPTIME_OID = '1.3.6.1.2.1.1.3.0'
+IFPHYSADDRESS_OID = '1.3.6.1.2.1.2.2.1.6'
+
+def normalize_mac(mac_str):
+    clean = mac_str.replace(':', '').replace('-', '').replace('.', '').lower()
+    if len(clean) != 12 or not all(c in '0123456789abcdef' for c in clean):
+        raise ValueError(f"Invalid MAC address format: {mac_str}")
+    return ':'.join(clean[i:i+2] for i in range(0, 12, 2))
 
 
 def parse_arguments():
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        '--host',
-        required=True
-    )
-
-    parser.add_argument(
-        '--community',
-        required=True
-    )
-
-    parser.add_argument(
-        '--version',
-        default='2c'
-    )
-
-    parser.add_argument(
-        '--port',
-        type=int,
-        default=161
-    )
-
-    parser.add_argument(
-        '--timeout',
-        type=int,
-        default=5
-    )
-
-    parser.add_argument(
-        '--retries',
-        type=int,
-        default=2
-    )
-
-    parser.add_argument(
-        '--uplink-pattern',
-        default='TenGig|Port-channel|Uplink'
-    )
-
+    parser = argparse.ArgumentParser(description="SNMP MAC Finder")
+    parser.add_argument('--macs', nargs='+', required=True, help='MAC addresses to search for')
+    parser.add_argument('--agents', nargs='+', required=True, help='SNMP agents in ip:port:community format')
+    parser.add_argument('--version', default='2c', choices=['2c', '3'])
+    parser.add_argument('--timeout', type=int, default=5)
+    parser.add_argument('--retries', type=int, default=2)
+    parser.add_argument('--uplink-pattern', default='TenGig|Port-channel|Uplink')
     return parser.parse_args()
 
+def parse_agent(agent_string):
+
+    ip, port, community = agent_string.split(':')
+
+    return {
+        'ip': ip,
+        'port': int(port),
+        'community': community
+    }
 
 def get_sysuptime(agent):
-
+    """
+    Fetches the system uptime. Must be at the module level.
+    """
     session = Session(
         hostname=agent['ip'],
         community=agent['community'],
@@ -63,14 +46,36 @@ def get_sysuptime(agent):
         remote_port=agent['port']
     )
 
-    result = session.get(SYSUPTIME_OID)
+    try:
+        result = session.get(SYSUPTIME_OID)
+        return int(result.value)
+    except Exception as e:
+        print(f"{agent['ip']} | SYSUPTIME ERROR | {e}")
+        return None
 
-    return int(result.value)
+
+def classify_port(interface_name, mac_count, uplink_pattern):
+    name = interface_name.lower()
+    
+    # Properly aligned regex check
+    if re.search(uplink_pattern, interface_name, re.IGNORECASE):
+        return "UPLINK"
+
+    if (
+        "gigabitethernet" in name or
+        "fastethernet" in name or
+        "access" in name
+    ):
+        return "EDGE"
+
+    # Fallback: MAC count heuristic
+    if mac_count > 1:
+        return "UPLINK"
+
+    return "EDGE"
 
 
 def retrieve_ifindex_mapping(agent):
-    
-
     bridge_to_ifindex = {}
     session = Session(
         hostname=agent['ip'],
@@ -103,7 +108,6 @@ def retrieve_ifindex_mapping(agent):
 
 def retrieve_ifdescr_mapping(agent):
     ifindex_to_name = {}
-
     session = Session(
         hostname=agent['ip'],
         community=agent['community'],
@@ -113,7 +117,6 @@ def retrieve_ifdescr_mapping(agent):
 
     try:
         entries = session.bulkwalk(IFDESCR_OID)
-
         for entry in entries:
             try:
                 # OID suffix = ifIndex
@@ -127,11 +130,7 @@ def retrieve_ifdescr_mapping(agent):
                 ifindex_to_name[ifindex] = interface_name
 
             except ValueError as ve:
-                print(
-                    f"Skipping ifDescr entry "
-                    f"(OID={entry.oid}) "
-                    f"because: {ve}"
-                )
+                print(f"Skipping ifDescr entry (OID={entry.oid}) because: {ve}")
 
         return ifindex_to_name
 
@@ -153,7 +152,6 @@ def retrieve_mac_addresses(agent):
         entries = session.bulkwalk(FDB_PORT_OID)
         for entry in entries:
             try:
-                
                 if entry.oid_index == '':
                     mac_parts = entry.oid.split('.')[-6:]
                 else:
@@ -181,29 +179,179 @@ def retrieve_mac_addresses(agent):
 
 
 def main():
-    agents = parse_agents()
+
+    args = parse_arguments()
+
+    agents = [
+        parse_agent(agent)
+        for agent in args.agents
+    ]
+
+    requested_macs = {
+        mac.lower().replace('-', ':')
+        for mac in args.macs
+    }
+
+    print("\nRequested MACs:")
+    for mac in requested_macs:
+        print(f"  {mac}")
+
+    results = {}
+
+    for mac in requested_macs:
+        results[mac] = []
 
     for agent in agents:
-        print(f"\n--- Fetching MAC table for {agent['ip']} ---")
+
+        print(
+            f"\n=============================="
+        )
+        print(
+            f"Processing agent {agent['ip']}"
+        )
+        print(
+            f"=============================="
+        )
+
+        #
+        # Step 0 - sysUpTime BEFORE collection
+        #
+        start_uptime = get_sysuptime(agent)
+
+        if start_uptime is None:
+
+            print(
+                f"TIMEOUT: agent "
+                f"{agent['ip']} did not respond"
+            )
+
+            continue
+
+        print(
+            f"Start sysUpTime: "
+            f"{start_uptime}"
+        )
+
+        #
+        # Step 1 - MAC Table
+        #
         mac_table = retrieve_mac_addresses(agent)
-        
-       
-        port_mac_count = {}
+
+        print(
+            f"{agent['ip']} returned "
+            f"{len(mac_table)} MAC entries"
+        )
+
+        #
+        # Print first few MACs discovered
+        #
+        count = 0
+
         for mac, bridge_port in mac_table.items():
+
+            print(
+                f"DEBUG MAC: "
+                f"{mac} -> bridge port "
+                f"{bridge_port}"
+            )
+
+            count += 1
+
+            if count >= 10:
+                break
+
+        #
+        # Count MACs per bridge port
+        #
+        port_mac_count = {}
+
+        for mac, bridge_port in mac_table.items():
+
             if bridge_port not in port_mac_count:
                 port_mac_count[bridge_port] = 0
+
             port_mac_count[bridge_port] += 1
 
-        print(f"\n--- Fetching ifIndex mapping for {agent['ip']} ---")
+        #
+        # Step 2
+        #
         bridge_mapping = retrieve_ifindex_mapping(agent)
-        
-        print(f"\n--- Fetching ifDescr mapping for {agent['ip']} ---")
+
+        print(
+            f"{agent['ip']} returned "
+            f"{len(bridge_mapping)} "
+            f"bridge-port mappings"
+        )
+
+        #
+        # Step 3
+        #
         ifdescr_mapping = retrieve_ifdescr_mapping(agent)
 
-        print(f"\n--- Combined Results for {agent['ip']} ---")
+        print(
+            f"{agent['ip']} returned "
+            f"{len(ifdescr_mapping)} "
+            f"interface descriptions"
+        )
+
+        #
+        # sysUpTime AFTER collection
+        #
+        end_uptime = get_sysuptime(agent)
+
+        if end_uptime is None:
+
+            print(
+                f"TIMEOUT: agent "
+                f"{agent['ip']} did not respond"
+            )
+
+            continue
+
+        print(
+            f"End sysUpTime: "
+            f"{end_uptime}"
+        )
+
+        #
+        # Reboot detection
+        #
+        if end_uptime < start_uptime:
+
+            print(
+                f"Agent {agent['ip']} "
+                f"has RESET — results from "
+                f"this agent may be stale"
+            )
+
+            continue
+
+        #
+        # Build final results
+        #
         for mac, bridge_port in mac_table.items():
-            
+
+            #
+            # DEBUG
+            #
+            if mac.lower() not in requested_macs:
+
+                print(
+                    f"Skipping {mac} "
+                    f"(not requested)"
+                )
+
+                continue
+
             if bridge_port not in bridge_mapping:
+
+                print(
+                    f"Skipping {mac} "
+                    f"(bridge port "
+                    f"{bridge_port} "
+                    f"not mapped)"
+                )
+
                 continue
 
             ifindex = bridge_mapping[bridge_port]
@@ -220,19 +368,56 @@ def main():
 
             port_type = classify_port(
                 interface_name,
-                mac_count
+                mac_count,
+                args.uplink_pattern
             )
 
-            # Properly indented inside the combination loop
             print(
-                f"{agent['ip']} | "
-                f"{mac} | "
-                f"bridge port {bridge_port} | "
-                f"ifIndex {ifindex} | "
-                f"{interface_name} | "
-                f"{port_type}"
+                f"MATCH FOUND: "
+                f"{mac} -> "
+                f"{interface_name}"
             )
 
+            results[mac.lower()].append(
+                {
+                    "agent": agent["ip"],
+                    "port": interface_name,
+                    "type": port_type.lower()
+                }
+            )
 
+    #
+    # Final Reporting
+    #
+    print(
+        "\n=============================="
+    )
+    print(
+        "FINAL REPORT"
+    )
+    print(
+        "=============================="
+    )
+
+    for mac in requested_macs:
+
+        if len(results[mac]) == 0:
+
+            print(
+                f"{mac} | NOT FOUND"
+            )
+
+            continue
+
+        for entry in results[mac]:
+
+            print(
+                f"{mac} | "
+                f"{entry['agent']} | "
+                f"{entry['port']} | "
+                f"{entry['type']}"
+            )
+    for mac in requested_macs:
+        print("Checking", mac)
 if __name__ == "__main__":
     main()

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+MACS=()
+AGENTS=()
+
+SEPARATOR_FOUND=0
+
+for arg in "$@"
+do
+    if [ "$arg" = "--" ]
+    then
+        SEPARATOR_FOUND=1
+        continue
+    fi
+
+    if [ $SEPARATOR_FOUND -eq 0 ]
+    then
+        MACS+=("$arg")
+    else
+        AGENTS+=("$arg")
+    fi
+done
+
+echo "MACS: ${MACS[@]}"
+echo "AGENTS: ${AGENTS[@]}"
+echo "tool started"
+python3 macfind2.py \
+    --macs "${MACS[@]}" \
+    --agents "${AGENTS[@]}"
+echo "script ended
+"
