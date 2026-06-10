@@ -4,7 +4,6 @@ import re
 from collections import defaultdict
 from easysnmp import Session
 
-# Handle exception class naming differences across easysnmp versions
 try:
     from easysnmp.exceptions import EasySNMPTimeoutError
 except ImportError:
@@ -20,11 +19,7 @@ SYSDESCR_OID = '1.3.6.1.2.1.1.1.0'
 
 
 def detect_snmp_capabilities(host, community, port):
-    """
-    Probes three critical OIDs under both SNMP versions independently.
-    Returns a capability map: which version works best for each table.
-    A version 'works' if it returns at least one non-empty result.
-    """
+   
     probe_timeout = 5
     probe_retries = 1
 
@@ -49,7 +44,7 @@ def detect_snmp_capabilities(host, community, port):
             for oid, is_walk, label in probes:
                 try:
                     if is_walk:
-                        # Single-step walk — just need 1 row to confirm access
+                    
                         result = session.walk(oid)
                         success = len(list(result)) > 0
                     else:
@@ -65,7 +60,6 @@ def detect_snmp_capabilities(host, community, port):
             print(f"   ❌ SNMPv{version_name} session failed: {type(e).__name__}: {e}")
             version_results[version_name] = {}
 
-    # Build capability map: pick best version per table
     caps = {}
     for label in ['sysDescr', 'ifDescr', 'FDB']:
         v2_ok = version_results.get('2c', {}).get(label, False)
@@ -84,11 +78,7 @@ def detect_snmp_capabilities(host, community, port):
 
 
 def snmp_walk_table(session, oid, is_v1, host, table_name):
-    """
-    Version-aware table walker.
-    - SNMPv1: Uses GETNEXT (walk)
-    - SNMPv2c: Uses GETBULK with max_repetitions=15 to prevent packet drops
-    """
+    
     try:
         if is_v1:
             return list(session.walk(oid))
@@ -113,11 +103,7 @@ def classify_port(interface_name, mac_count, uplink_pattern):
 
 
 def probe_switch(host, args):
-    """
-    Probes a single switch using per-table version capability mapping.
-    FDB and interface name tables are each collected under whichever SNMP
-    version actually returned data during capability detection, independently.
-    """
+    
     print(f"\nProbing switch: {host} (SNMP Port: {args.port})")
     print("-" * 120)
 
@@ -201,7 +187,7 @@ def probe_switch(host, args):
     # 6. ifIndex -> Name (Consolidated Layer 1-4 Logic)
     ifindex_to_name = {}
     if name_session:
-        # Layer 1: ifDescr as baseline
+        #1: ifDescr as baseline
         for entry in snmp_walk_table(name_session, IFDESCR_OID, is_v1_name, host, "ifDescr"):
             try:
                 idx = entry.oid.split('.')[-1] if entry.oid_index == '' else entry.oid_index.replace('.', '')
@@ -210,7 +196,7 @@ def probe_switch(host, args):
             except Exception:
                 continue
 
-        # Layer 2: ifName — overwrite only when it gives something more readable than a bare number
+        #2: ifName — overwrite only when it gives something more readable than a bare number
         for entry in snmp_walk_table(name_session, IFNAME_OID, is_v1_name, host, "ifName"):
             try:
                 idx = entry.oid.split('.')[-1] if entry.oid_index == '' else entry.oid_index.replace('.', '')
@@ -222,7 +208,7 @@ def probe_switch(host, args):
             except Exception:
                 continue
 
-        # Layer 3: ifAlias — overwrite when non-empty (operator-assigned labels)
+        #3: ifAlias — overwrite when non-empty (operator-assigned labels)
         for entry in snmp_walk_table(name_session, IFALIAS_OID, is_v1_name, host, "ifAlias"):
             try:
                 idx = entry.oid.split('.')[-1] if entry.oid_index == '' else entry.oid_index.replace('.', '')
@@ -235,13 +221,13 @@ def probe_switch(host, args):
     else:
         print("   ⚠️ Interface name table inaccessible. Names will show as UNKNOWN.")
 
-    # Layer 4: Synthesize Port-<N> for numeric/empty names (Aruba physical ports fallback)
+    #4: Synthesize Port-<N> for numeric/empty names (Aruba physical ports fallback)
     for bp, ifindex in bridge_to_ifindex.items():
         current = ifindex_to_name.get(ifindex, "")
         if not current or current.isdigit():
             ifindex_to_name[ifindex] = f"Port-{ifindex}"
 
-    # 7. Report
+   
     port_macs = defaultdict(list)
     for mac, bp in mac_table.items():
         port_macs[bp].append(mac)
@@ -277,8 +263,6 @@ def main():
     
     args = parser.parse_args()
     
-    # NO multiplication needed. easysnmp expects seconds.
-    # args.timeout is passed directly to Session.
 
     for host in args.hosts:
         probe_switch(host, args)
