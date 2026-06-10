@@ -24,7 +24,7 @@ done
 # echo "MACS: ${MACS[@]}"
 # echo "AGENTS: ${AGENTS[@]}"
 # echo "tool started"
-python3 macfind2.py \
+python3 macfind.py \
     --macs "${MACS[@]}" \
     --agents "${AGENTS[@]}"
 # echo "script ended"
