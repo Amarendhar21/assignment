@@ -21,11 +21,10 @@ do
     fi
 done
 
-echo "MACS: ${MACS[@]}"
-echo "AGENTS: ${AGENTS[@]}"
-echo "tool started"
+# echo "MACS: ${MACS[@]}"
+# echo "AGENTS: ${AGENTS[@]}"
+# echo "tool started"
 python3 macfind2.py \
     --macs "${MACS[@]}" \
     --agents "${AGENTS[@]}"
-echo "script ended
-"
+# echo "script ended"
