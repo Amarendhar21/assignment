@@ -242,6 +242,35 @@ def retrieve_mac_addresses(agent):
                 mac_table[mac_address] = bridge_port # save to dictionary Maps the clean MAC string to its port.
             except (ValueError, AttributeError):
                 continue
+        # If the standard dot1dTpFdbTable returned no results, try the Q-BRIDGE-MIB table.
+        if not mac_table:
+            logger.debug(f"{agent['ip']}: dot1d FDB empty, trying Q-BRIDGE-MIB fallback...")
+            Q_BRIDGE_OID = '1.3.6.1.2.1.17.7.1.2.2'  # dot1qTpFdbPort
+            try:
+                q_entries = session.bulkwalk(Q_BRIDGE_OID)
+                for entry in q_entries:
+                    try:
+                        if entry.oid_index == '':
+                            mac_parts = entry.oid.split('.')[-6:]
+                        else:
+                            parts = [p for p in entry.oid_index.split('.') if p != '']
+                            if len(parts) >= 6:
+                                mac_parts = parts[-6:]
+                            else:
+                                continue
+                        if len(mac_parts) != 6:
+                            continue
+                        mac_address = ':'.join(f"{int(part):02x}" for part in mac_parts)
+                        if not entry.value or entry.value == '0':
+                            continue
+                        bridge_port = int(entry.value)
+                        mac_table[mac_address] = bridge_port
+                    except (ValueError, AttributeError):
+                        continue
+                if mac_table:
+                    logger.debug(f"{agent['ip']}: Q-BRIDGE fallback succeeded, found {len(mac_table)} MACs")
+            except Exception as e:
+                logger.debug(f"{agent['ip']}: Q-BRIDGE fallback failed: {e}")
         # If a row is malformed (bad hex, missing value, etc.), skip it and move to the next row without crashing.
     except Exception as e:
         logger.debug(f"Failed to retrieve MAC table from {agent['ip']}: {e}")

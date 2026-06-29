@@ -16,18 +16,6 @@ Install the required Python package using pip:
 pip install easysnmp
 ```
 
-## Helper Script
-
-A helper script was used to collect MAC addresses from the switches. The collected MAC addresses were then used to test the `macfind` tool.
-
-The helper script can be executed using:
-
-```bash
-python3 snmp_prober.py --hosts <switch_ip> --community <community_string>
-```
-
-The script produces a list of learned MAC addresses along with the corresponding switch ports and interface information.
-
 ## Running the MAC Finder Tool
 
 Once the MAC addresses have been collected using the helper script, the MAC finder tool can be executed using one or more MAC addresses.
