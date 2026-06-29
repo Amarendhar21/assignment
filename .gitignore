@@ -32,6 +32,5 @@ credentials.yml
 # Test/log output
 *.log
 *.pcap
- logs.txt
-
- Nsologs.txt
+logs.txt
+Nsologs.txt
