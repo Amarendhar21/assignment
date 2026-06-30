@@ -18,6 +18,7 @@ FDB_PORT_OID = '1.3.6.1.2.1.17.4.3.1.2'
 BASE_PORT_IFINDEX_OID = '1.3.6.1.2.1.17.1.4.1.2'
 IFDESCR_OID = '1.3.6.1.2.1.2.2.1.2'
 IFNAME_OID = '1.3.6.1.2.1.31.1.1.1.1'
+IFALIAS_OID = '1.3.6.1.2.1.31.1.1.1.18'  # NEW: For operator-assigned labels
 SYSUPTIME_OID = '1.3.6.1.2.1.1.3.0'
 IFPHYSADDRESS_OID = '1.3.6.1.2.1.2.2.1.6'
 SYSDESCR_OID = '1.3.6.1.2.1.1.1.0'
@@ -202,6 +203,22 @@ def retrieve_ifdescr_mapping(agent):
             except (ValueError, AttributeError):
                 continue
 
+        # 3. Walk ifAlias (operator-assigned labels take highest priority)
+        alias_entries = session.bulkwalk(IFALIAS_OID)
+        for entry in alias_entries:
+            try:
+                if entry.oid_index == '':
+                    ifindex_str = entry.oid.split('.')[-1]
+                else:
+                    ifindex_str = entry.oid_index.replace('.', '')
+                
+                ifindex = int(ifindex_str)
+                alias = entry.value.strip() if entry.value else ""
+                if alias:  # Only overwrite if alias is actually set
+                    ifindex_to_name[ifindex] = alias
+            except (ValueError, AttributeError):
+                continue
+
     except Exception as e:
         logger.debug(f"Failed to retrieve interface names from {agent['ip']}: {e}")
         
@@ -242,35 +259,6 @@ def retrieve_mac_addresses(agent):
                 mac_table[mac_address] = bridge_port # save to dictionary Maps the clean MAC string to its port.
             except (ValueError, AttributeError):
                 continue
-        # If the standard dot1dTpFdbTable returned no results, try the Q-BRIDGE-MIB table.
-        if not mac_table:
-            logger.debug(f"{agent['ip']}: dot1d FDB empty, trying Q-BRIDGE-MIB fallback...")
-            Q_BRIDGE_OID = '1.3.6.1.2.1.17.7.1.2.2'  # dot1qTpFdbPort
-            try:
-                q_entries = session.bulkwalk(Q_BRIDGE_OID)
-                for entry in q_entries:
-                    try:
-                        if entry.oid_index == '':
-                            mac_parts = entry.oid.split('.')[-6:]
-                        else:
-                            parts = [p for p in entry.oid_index.split('.') if p != '']
-                            if len(parts) >= 6:
-                                mac_parts = parts[-6:]
-                            else:
-                                continue
-                        if len(mac_parts) != 6:
-                            continue
-                        mac_address = ':'.join(f"{int(part):02x}" for part in mac_parts)
-                        if not entry.value or entry.value == '0':
-                            continue
-                        bridge_port = int(entry.value)
-                        mac_table[mac_address] = bridge_port
-                    except (ValueError, AttributeError):
-                        continue
-                if mac_table:
-                    logger.debug(f"{agent['ip']}: Q-BRIDGE fallback succeeded, found {len(mac_table)} MACs")
-            except Exception as e:
-                logger.debug(f"{agent['ip']}: Q-BRIDGE fallback failed: {e}")
         # If a row is malformed (bad hex, missing value, etc.), skip it and move to the next row without crashing.
     except Exception as e:
         logger.debug(f"Failed to retrieve MAC table from {agent['ip']}: {e}")
@@ -334,6 +322,11 @@ def main():
 
         bridge_mapping = retrieve_ifindex_mapping(agent) # walk bridge port to ifindex
         ifdescr_mapping = retrieve_ifdescr_mapping(agent) # walk ifindex to interface name
+
+        # Layer 4: Synthesize Port-<N> for any remaining numeric/empty names
+        for ifindex, name in ifdescr_mapping.items():
+            if not name or name.isdigit():
+                ifdescr_mapping[ifindex] = f"Port-{ifindex}"
 
         end_uptime = get_sysuptime(agent)
         if end_uptime is None:
